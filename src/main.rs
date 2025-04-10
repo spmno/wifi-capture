@@ -46,6 +46,7 @@ fn parse_80211_mgt(data: &[u8]) {
             println!("Got frame: {frame:?}");
             if let Frame::Beacon(beacon) = frame {
                 println!("this is the beacon frame: {:?}", beacon);
+                println!("vendor info: {:?}", beacon.station_info.vendor_specific);
             } else {
                 println!("not beacon frame.");
             }
