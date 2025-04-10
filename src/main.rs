@@ -1,7 +1,9 @@
+use tracing::{info, error};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_appender::{non_blocking, rolling::{self}};
 use pcap::{Capture, Device, Packet};
-use serde::Serialize;
-use std::collections::HashMap;
 use libwifi::{frame::{self, Beacon}, parse_frame, Frame};
+
 
 pub mod wifi;
 
@@ -10,10 +12,10 @@ fn get_wifi_devices() -> Vec<Device> {
     let devices = Device::list().unwrap();
     let mut wifi_devices = Vec::new();
 
-    println!("Available WiFi network devices:");
+    info!("Available WiFi network devices:");
     for device in devices {
         if device.name.contains("wl") {
-            println!("Name: {}, Description: {:?}", device.name, device.desc);
+            info!("Name: {}, Description: {:?}", device.name, device.desc);
             wifi_devices.push(device);
         }
     }
@@ -26,10 +28,10 @@ fn capture_wifi_channel(device: Device)  {
         .snaplen(65535)
         .open().unwrap();
 
-    println!("Capturing on device");
+    info!("Capturing on device");
 
     while let Ok(packet) = cap.next_packet() {
-        println!("received packet! {:?}", packet);
+        info!("received packet! {:?}", packet);
         process_packet(packet);
     }
 }
@@ -43,16 +45,16 @@ struct RadiotapHeader {
 fn parse_80211_mgt(data: &[u8]) {
     match parse_frame(data, false) {
         Ok(frame) => {
-            println!("Got frame: {frame:?}");
+            info!("Got frame: {frame:?}");
             if let Frame::Beacon(beacon) = frame {
-                println!("this is the beacon frame: {:?}", beacon);
-                println!("vendor info: {:?}", beacon.station_info.vendor_specific);
+                info!("this is the beacon frame: {:?}", beacon);
+                info!("vendor info: {:?}", beacon.station_info.vendor_specific);
             } else {
-                println!("not beacon frame.");
+                info!("not beacon frame.");
             }
         }
         Err(err) => {
-            println!("Error during parsing : {err:?}");
+            error!("Error during parsing : {err:?}");
         }
     }
 }
@@ -100,6 +102,16 @@ fn parse_radiotap(data: &[u8]) -> (RadiotapHeader, &[u8]) {
 }
 
 fn main() {
+    let file_appender = rolling::daily("logs", "capture.log");
+    //let file_appender = BasicRollingFileAppender::new("./logs", RollingConditionBasic::new().daily(), MAX_FILE_COUNT).unwrap();
+    let (non_blocking_appender, _guard) = non_blocking(file_appender);
+    let file_layer = fmt::layer()
+        .with_ansi(false)
+        .with_writer(non_blocking_appender);
+
+    let console_subscriber = fmt::layer().with_writer(std::io::stdout);
+
+    tracing_subscriber::registry().with(console_subscriber).with(file_layer).init();
     let wifi_devices = get_wifi_devices();
     if !wifi_devices.is_empty() {
         capture_wifi_channel(wifi_devices.first().unwrap().clone());
