@@ -1,7 +1,7 @@
 use tracing::{info, error};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender::{non_blocking, rolling::{self}};
-use pcap::{Capture, Device, Packet};
+use pnet::datalink::{self, interfaces, Channel, NetworkInterface};
 use libwifi::{frame::{self, Beacon}, parse_frame, Frame};
 use chrono::Local;
 
@@ -9,35 +9,48 @@ use chrono::Local;
 pub mod wifi;
 
 
-fn get_wifi_devices() -> Vec<Device> {
-    let devices = Device::list().unwrap();
+fn get_wifi_devices() -> Vec<NetworkInterface> {
+ let interfaces = interfaces();
     let mut wifi_devices = Vec::new();
 
     info!("Available WiFi network devices:");
-    for device in devices {
-        if device.name.contains("wl") {
-            info!("Name: {}, Description: {:?}", device.name, device.desc);
-            wifi_devices.push(device);
+    for interface in interfaces {
+        // 根据操作系统调整过滤条件
+        if interface.name.contains("wl") || interface.name.contains("wlan") {
+            info!("Name: {}, MAC: {:?}", interface.name, interface.mac);
+            wifi_devices.push(interface);
         }
     }
     wifi_devices
 }
 
-fn capture_wifi_channel(device: Device)  {
-    let mut cap = Capture::from_device(device).unwrap()
-        //.promisc(true)
-        //.snaplen(65535)
-        .open().unwrap();
+fn capture_wifi_channel(interface: NetworkInterface)  {
+let (mut tx, mut rx) = match datalink::channel(&interface, Default::default()) {
+        Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
+        Ok(_) => {
+            error!("Unsupported channel type");
+            return;
+        }
+        Err(e) => {
+            error!("Failed to create channel: {}", e);
+            return;
+        }
+    };
 
-    info!("Capturing on device");
-
-    while let Ok(packet) = cap.next_packet() {
-        //info!("received packet! {:?}", packet);
-        let current_time = Local::now().format("%H:%M:%S").to_string();
-        info!("当前时间1: {}", current_time);
-        process_packet(packet);
-        let current_time = Local::now().format("%H:%M:%S").to_string();
-        info!("当前时间2: {}", current_time);
+    info!("Capturing on {}", interface.name);
+    
+    loop {
+        match rx.next() {
+            Ok(packet) => {
+                process_packet(packet);
+                let current_time = Local::now().format("%H:%M:%S").to_string();
+                info!("当前时间: {}", current_time);
+            }
+            Err(e) => {
+                error!("Error reading packet: {}", e);
+                break;
+            }
+        }
     }
 }
 
@@ -50,10 +63,13 @@ struct RadiotapHeader {
 fn parse_80211_mgt(data: &[u8]) {
     match parse_frame(data, false) {
         Ok(frame) => {
-            info!("Got frame: {frame:?}");
+            //info!("Got frame: {frame:?}");
             if let Frame::Beacon(beacon) = frame {
                 info!("this is the beacon frame: {:?}", beacon);
                 info!("vendor info: {:?}", beacon.station_info.vendor_specific);
+                if (beacon.station_info.vendor_specific[0].element_id == 221) && (beacon.station_info.vendor_specific[0].oui_type == 13) {
+
+                }
             } else {
                 info!("not beacon frame.");
             }
@@ -65,12 +81,12 @@ fn parse_80211_mgt(data: &[u8]) {
 }
 
 
-fn process_packet(packet: Packet) {
-    if packet.len() < 200 {
+fn process_packet(packet: &[u8]) {
+    if packet.len() < 100 {
         return;
     }
-    let data = packet.data;
-    let (radiotap, remaining) = parse_radiotap(data);
+    //let data = packet.data;
+    let (radiotap, remaining) = parse_radiotap(packet);
     parse_80211_mgt(remaining);
 }
 
@@ -120,4 +136,40 @@ fn main() {
     if !wifi_devices.is_empty() {
         capture_wifi_channel(wifi_devices.first().unwrap().clone());
     }
+}
+
+
+#[cfg(test)]
+mod tests {
+    // 注意这个惯用法：在 tests 模块中，从外部作用域导入所有名字。
+    use super::*;
+
+    #[test]
+    fn test_process_packet() {
+        let file_appender = rolling::daily("logs", "capture.log");
+    let (non_blocking_appender, _guard) = non_blocking(file_appender);
+    let file_layer = fmt::layer()
+        .with_ansi(false)
+        .with_writer(non_blocking_appender);
+
+    let console_subscriber = fmt::layer().with_writer(std::io::stdout);
+
+    tracing_subscriber::registry().with(console_subscriber).with(file_layer).init();
+        let packet = vec![0x00, 0x00, 0x26, 0x00, 0x2f, 0x40, 0x00, 0xa0,  0x20, 0x08, 0x00, 0xa0, 0x20, 0x08, 0x00, 0x00,
+                                   0x74, 0x71, 0xf3, 0x0b, 0x00, 0x00, 0x00, 0x00,  0x10, 0x0c, 0x85, 0x09, 0xc0, 0x00, 0x10, 0x00,
+                                   0x00, 0x00, 0xc4, 0x00, 0x10, 0x01, 0x80, 0x00,  0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                   0xe4, 0x7a, 0x2c, 0x24, 0x3d, 0x26, 0xe4, 0x7a,  0x2c, 0x24, 0x3d, 0x26, 0x00, 0x00, 0x80, 0x84,
+                                   0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0xa0, 0x00,  0x20, 0x04, 0x00, 0x18, 0x52, 0x49, 0x44, 0x2d,
+                                   0x31, 0x35, 0x38, 0x31, 0x46, 0x37, 0x46, 0x56,  0x43, 0x32, 0x35, 0x31, 0x41, 0x30, 0x30, 0x43,
+                                   0x51, 0x32, 0x35, 0x43, 0xdd, 0x53, 0xfa, 0x0b,  0xbc, 0x0d, 0x75, 0xf1, 0x19, 0x03, 0x01, 0x12,
+                                   0x31, 0x35, 0x38, 0x31, 0x46, 0x37, 0x46, 0x56,  0x43, 0x32, 0x35, 0x31, 0x41, 0x30, 0x30, 0x43,
+                                   0x51, 0x32, 0x35, 0x43, 0x00, 0x00, 0x00, 0x11,  0x22, 0xb5, 0x00, 0x00, 0xfd, 0x1d, 0xdd, 0x18,
+                                   0xe3, 0x39, 0x9a, 0x49, 0xf2, 0x08, 0x48, 0x08,  0xd2, 0x07, 0x3b, 0x04, 0xee, 0x13, 0x0a, 0x00,
+                                   0x41, 0x08, 0x00, 0x1e, 0xdd, 0x18, 0x00, 0x3a,  0x9a, 0x49, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                   0x00, 0x01, 0x46, 0x08, 0xae, 0xce, 0xd1, 0x0b,  0x00, 0xb6, 0xba, 0x45, 0xe7];
+        info!("start process packet.");
+        process_packet(&packet);
+        assert_eq!(4, 3);
+    }
+
 }
