@@ -3,6 +3,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Lay
 use tracing_appender::{non_blocking, rolling::{self}};
 use pcap::{Capture, Device, Packet};
 use libwifi::{frame::{self, Beacon}, parse_frame, Frame};
+use chrono::Local;
 
 
 pub mod wifi;
@@ -24,15 +25,19 @@ fn get_wifi_devices() -> Vec<Device> {
 
 fn capture_wifi_channel(device: Device)  {
     let mut cap = Capture::from_device(device).unwrap()
-        .promisc(true)
-        .snaplen(65535)
+        //.promisc(true)
+        //.snaplen(65535)
         .open().unwrap();
 
     info!("Capturing on device");
 
     while let Ok(packet) = cap.next_packet() {
-        info!("received packet! {:?}", packet);
+        //info!("received packet! {:?}", packet);
+        let current_time = Local::now().format("%H:%M:%S").to_string();
+        info!("当前时间1: {}", current_time);
         process_packet(packet);
+        let current_time = Local::now().format("%H:%M:%S").to_string();
+        info!("当前时间2: {}", current_time);
     }
 }
 
@@ -103,7 +108,6 @@ fn parse_radiotap(data: &[u8]) -> (RadiotapHeader, &[u8]) {
 
 fn main() {
     let file_appender = rolling::daily("logs", "capture.log");
-    //let file_appender = BasicRollingFileAppender::new("./logs", RollingConditionBasic::new().daily(), MAX_FILE_COUNT).unwrap();
     let (non_blocking_appender, _guard) = non_blocking(file_appender);
     let file_layer = fmt::layer()
         .with_ansi(false)
