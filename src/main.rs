@@ -5,6 +5,8 @@ use tracing_appender::{non_blocking, rolling::{self}};
 use pnet::datalink::{self, interfaces, Channel, NetworkInterface};
 use libwifi::{frame::{self, Beacon}, parse_frame, Frame};
 use chrono::Local;
+use reqwest::blocking::Client;
+use std::time::Duration;
 use std::ops::Range;
 
 pub mod wifi;
@@ -75,7 +77,27 @@ fn parse_80211_mgt(data: &[u8]) {
                 info!("this is the beacon frame: {:?}", beacon);
                 info!("vendor info: {:?}", beacon.station_info.vendor_specific);
                 if (beacon.station_info.vendor_specific[0].element_id == 221) && (beacon.station_info.vendor_specific[0].oui_type == 13) {
-                    let mut upload_data = UploadData { rid: String::from(""), longitude: 0, latitude: 0 };
+                    let mut upload_data = UploadData {rid: String::from(""),
+                            run_status: 10,
+                            reserved_flag: true,
+                            height_type: 2,
+                            track_direction: false,
+                            speed_multiplier: true,
+                            track_angle: 45,
+                            ground_speed: 30,
+                            vertical_speed: -5,
+                            latitude: 34789012,
+                            longitude: 11567890,
+                            pressure_altitude: 1500,
+                            geometric_altitude: 1520,
+                            ground_altitude: 1485,
+                            vertical_accuracy: 3,
+                            horizontal_accuracy: 2,
+                            speed_accuracy: 1,
+                            timestamp: 12345,
+                            timestamp_accuracy: 0,
+                            reserved: 0,
+                        };
                     let ssid = beacon.station_info.ssid();
                     let vendor_data = &beacon.station_info.vendor_specific[0].data;
                     info!("this is the openid element, ssid: {:?}, total len: {}, pack count: {}, pack size: {}", ssid, vendor_data[0], vendor_data[3], vendor_data[2]);
@@ -101,6 +123,17 @@ fn parse_80211_mgt(data: &[u8]) {
                             }
                         }
                     }
+                    let json = serde_json::to_string_pretty(&upload_data).unwrap();
+                    info!("json: {}", json);
+                    let client = Client::builder()
+                        .timeout(Duration::from_secs(10)) // 设置超时
+                        .build().unwrap();
+                     let response = client
+                        .post("http://182.92.155.88:8111/position") // 替换your_endpoint
+                        .json(&json)  // 自动设置Content-Type: application/json
+                        .send().unwrap();
+                    info!("status: {}, text: {}", response.status(), response.text().unwrap());  
+
                 }
             } else {
                 info!("not beacon frame.");
