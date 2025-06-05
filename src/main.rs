@@ -1,3 +1,4 @@
+use message::message::{Message, MessageError};
 use tracing::{info, error};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender::{non_blocking, rolling::{self}};
@@ -6,8 +7,13 @@ use libwifi::{frame::{self, Beacon}, parse_frame, Frame};
 use chrono::Local;
 
 
-pub mod wifi;
 
+pub mod wifi;
+pub mod message;
+
+
+use crate::message::base_message::BaseMessage;
+use crate::message::position_vector_message::PositionVectorMessage;
 
 fn get_wifi_devices() -> Vec<NetworkInterface> {
  let interfaces = interfaces();
@@ -68,7 +74,15 @@ fn parse_80211_mgt(data: &[u8]) {
                 info!("this is the beacon frame: {:?}", beacon);
                 info!("vendor info: {:?}", beacon.station_info.vendor_specific);
                 if (beacon.station_info.vendor_specific[0].element_id == 221) && (beacon.station_info.vendor_specific[0].oui_type == 13) {
-
+                    let ssid = beacon.station_info.ssid();
+                    let vendor_data = &beacon.station_info.vendor_specific[0].data;
+                    info!("this is the openid element, ssid: {:?}, total len: {}, pack count: {}, pack size: {}", ssid, vendor_data[0], vendor_data[3], vendor_data[2]);
+                    let pack1 = &vendor_data[4..28];
+                    let pack2 = &vendor_data[28..52];
+                    let pack3 = &vendor_data[52..76];
+                    let base_message = create_special_message(pack1).unwrap();
+                    info!("base message: {:?}", base_message.print());
+                    let position_vector_message = PositionVectorMessage::from_bytes(pack2);
                 }
             } else {
                 info!("not beacon frame.");
@@ -76,6 +90,40 @@ fn parse_80211_mgt(data: &[u8]) {
         }
         Err(err) => {
             error!("Error during parsing : {err:?}");
+        }
+    }
+}
+
+fn create_special_message(data: &[u8]) -> Result<Box<dyn Message>, MessageError> {
+    let message_type = (data[0] >> 4) & 0x0f;
+    let content = &data[1..];
+    match message_type {
+        BaseMessage::MESSAGE_TYPE => {
+            let message = BaseMessage::from_bytes(content);
+            match message {
+                Ok(message) => {
+                    return Ok(Box::new(message));
+                },
+                Err(err) => {
+                    error!("base error: {}", err);
+                    return  Err(err);
+                }
+            }
+        },
+        PositionVectorMessage::MESSAGE_TYPE =>{
+            let message = PositionVectorMessage::from_bytes(content);
+            match message {
+                Ok(message) => {
+                    return Ok(Box::new(message));
+                },
+                Err(err) => {
+                    error!("base error: {}", err);
+                    return  Err(err);
+                }
+            }
+        }
+        _ => {
+            return Err(MessageError::UnknownMessageType(0));
         }
     }
 }
