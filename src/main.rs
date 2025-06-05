@@ -1,19 +1,20 @@
-use message::message::{Message, MessageError};
+use message::{message::{Message, MessageError}, AnyMessage};
 use tracing::{info, error};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender::{non_blocking, rolling::{self}};
 use pnet::datalink::{self, interfaces, Channel, NetworkInterface};
 use libwifi::{frame::{self, Beacon}, parse_frame, Frame};
 use chrono::Local;
-
-
+use std::ops::Range;
 
 pub mod wifi;
 pub mod message;
+pub mod upload_data;
 
 
 use crate::message::base_message::BaseMessage;
 use crate::message::position_vector_message::PositionVectorMessage;
+use crate::upload_data::UploadData;
 
 fn get_wifi_devices() -> Vec<NetworkInterface> {
  let interfaces = interfaces();
@@ -74,15 +75,32 @@ fn parse_80211_mgt(data: &[u8]) {
                 info!("this is the beacon frame: {:?}", beacon);
                 info!("vendor info: {:?}", beacon.station_info.vendor_specific);
                 if (beacon.station_info.vendor_specific[0].element_id == 221) && (beacon.station_info.vendor_specific[0].oui_type == 13) {
+                    let mut upload_data = UploadData { rid: String::from(""), longitude: 0, latitude: 0 };
                     let ssid = beacon.station_info.ssid();
                     let vendor_data = &beacon.station_info.vendor_specific[0].data;
                     info!("this is the openid element, ssid: {:?}, total len: {}, pack count: {}, pack size: {}", ssid, vendor_data[0], vendor_data[3], vendor_data[2]);
-                    let pack1 = &vendor_data[4..28];
-                    let pack2 = &vendor_data[28..52];
-                    let pack3 = &vendor_data[52..76];
-                    let base_message = create_special_message(pack1).unwrap();
-                    info!("base message: {:?}", base_message.print());
-                    let position_vector_message = PositionVectorMessage::from_bytes(pack2);
+                    let count = vendor_data[3];
+                    for i in 0..count {
+                        
+                        let range: Range<usize> = ((25*i+4) as usize)..((25*i+29) as usize);
+                        info!("i = {}, range:{:?}", i, range);
+                        let pack = &vendor_data[range];
+                        let message = AnyMessage::from_bytes(pack).unwrap();
+                        match message {
+                            AnyMessage::Base(bm) => {
+                                bm.print();
+                                upload_data.rid = bm.uas_id;
+                            }, 
+                            AnyMessage::PositionVector(pvm) => {
+                                pvm.print();
+                                upload_data.longitude = pvm.longitude;
+                                upload_data.latitude = pvm.latitude;
+                            },
+                            AnyMessage::System(sm) => {
+                                sm.print();
+                            }
+                        }
+                    }
                 }
             } else {
                 info!("not beacon frame.");

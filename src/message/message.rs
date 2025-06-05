@@ -13,7 +13,8 @@ pub enum MessageError {
 #[derive(Debug, PartialEq)]
 pub enum MessageType {
     BaseMessageType = 0,
-    PositionVectorMessageType = 1
+    PositionVectorMessageType = 1,
+    SystemMessageType = 4,
 }
 
 impl std::error::Error for MessageError {}
