@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-use std::fmt;
 use std::str;
 
 use tracing::info;

@@ -3,7 +3,7 @@ use tracing::{info, error};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_appender::{non_blocking, rolling::{self}};
 use pnet::datalink::{self, interfaces, Channel, NetworkInterface};
-use libwifi::{frame::{self, Beacon}, parse_frame, Frame};
+use libwifi::{parse_frame, Frame};
 use chrono::Local;
 use reqwest::blocking::Client;
 use std::time::Duration;
@@ -25,7 +25,7 @@ fn get_wifi_devices() -> Vec<NetworkInterface> {
     info!("Available WiFi network devices:");
     for interface in interfaces {
         // 根据操作系统调整过滤条件
-        if interface.name.contains("wl") || interface.name.contains("wlan") {
+        if interface.name.contains("wlx") || interface.name.contains("wlan1") {
             info!("Name: {}, MAC: {:?}", interface.name, interface.mac);
             wifi_devices.push(interface);
         }
@@ -52,8 +52,8 @@ let (mut tx, mut rx) = match datalink::channel(&interface, Default::default()) {
         match rx.next() {
             Ok(packet) => {
                 process_packet(packet);
-                let current_time = Local::now().format("%H:%M:%S").to_string();
-                info!("当前时间: {}", current_time);
+                //let current_time = Local::now().format("%H:%M:%S").to_string();
+                //info!("当前时间: {}", current_time);
             }
             Err(e) => {
                 error!("Error reading packet: {}", e);
@@ -74,8 +74,8 @@ fn parse_80211_mgt(data: &[u8]) {
         Ok(frame) => {
             //info!("Got frame: {frame:?}");
             if let Frame::Beacon(beacon) = frame {
-                info!("this is the beacon frame: {:?}", beacon);
-                info!("vendor info: {:?}", beacon.station_info.vendor_specific);
+                //info!("this is the beacon frame: {:?}", beacon);
+                //info!("vendor info: {:?}", beacon.station_info.vendor_specific);
                 if (beacon.station_info.vendor_specific[0].element_id == 221) && (beacon.station_info.vendor_specific[0].oui_type == 13) {
                     let mut upload_data = UploadData {rid: String::from(""),
                             run_status: 10,
@@ -134,9 +134,11 @@ fn parse_80211_mgt(data: &[u8]) {
                         .send().unwrap();
                     info!("status: {}, text: {}", response.status(), response.text().unwrap());  
 
+                } else {
+                    print!("#");
                 }
             } else {
-                info!("not beacon frame.");
+                print!(".");
             }
         }
         Err(err) => {

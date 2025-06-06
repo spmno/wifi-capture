@@ -1,6 +1,4 @@
 use std::convert::TryInto;
-use std::fmt;
-
 use tracing::info;
 
 use super::message::{Message, MessageError};
