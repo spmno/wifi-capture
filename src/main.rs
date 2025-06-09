@@ -128,10 +128,15 @@ fn parse_80211_mgt(data: &[u8]) {
                     let client = Client::builder()
                         .timeout(Duration::from_secs(10)) // 设置超时
                         .build().unwrap();
-                     let response = client
-                        .post("http://182.92.155.88:8111/position") // 替换your_endpoint
-                        .json(&json)  // 自动设置Content-Type: application/json
-                        .send().unwrap();
+                    let response = client
+                        //.post("http://182.92.155.88:8111/position") // 替换your_endpoint
+                        .post("https://mx-lasm-lafs-dev.mxnavi.com/collect/api/v1/data/collect/rid")
+                        .json(&json)
+                        .send()
+                        .map_err(|err| {
+                            error!("发送失败: {}", err);
+                            err
+                        });
                     info!("status: {}, text: {}", response.status(), response.text().unwrap());  
 
                 } else {
